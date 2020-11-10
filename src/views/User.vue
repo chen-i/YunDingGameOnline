@@ -4,7 +4,7 @@
     class="user"
   >
     <p>
-      状态：{{user.status}}&nbsp;{{ user.status_msg && `${user.status_msg}` }}
+      状态：{{user.status}}&nbsp;{{ user.status_msg }}
       <ButtonGroup size="small" shape="circle">
         <Button
           size="small"
@@ -241,7 +241,25 @@
             :key="item._id"
             @click.native="() => {
               user.team.combat = item._id;
+              user.tempcombat = item._id;
               game.switchCombatScreen(item._id);
+            }"
+          >{{item.name}}</DropdownItem>
+        </DropdownMenu>
+      </Dropdown>
+      <Dropdown v-if="user.combatId" trigger="click">
+        <Button
+          size="small"
+          type="info"
+        >
+          {{ user.tempcombatname || '未选择' }}
+        </Button>
+        <DropdownMenu slot="list">
+          <DropdownItem
+             v-for="item in user.screens"
+            :key="item._id"
+            @click.native="() => {
+              user.combatId = item._id;
             }"
           >{{item.name}}</DropdownItem>
         </DropdownMenu>
@@ -253,7 +271,7 @@
     <template v-if="user.team && user.team.leader === user.email">
       [{{ user.team.users.length || 1 }}/{{user.combatTotal || '未知'}}]
       <Button
-        @click="game.leaveTeam()"
+        @click="game.leaveTeam();user.isleader=false;"
         size="small"
         type="error"
       >
@@ -273,20 +291,26 @@
         <span slot="open">战斗</span>
         <span slot="close">平时</span>
       </i-switch>
+      <a @click="() => {
+        game.showMyTeam(0);
+      }">隐藏</a>
     </template>
     <template v-else-if="user.team">
       队长[{{user.team.leader}}]
       <Button
         size="small"
         type="warning"
-        @click="game.leaveTeam()"
+        @click="() => {
+          game.leaveTeam();
+          delete user.teamleader;
+        }"
       >
         离开
       </Button>
     </template>
     <template v-else>
       <Button
-        @click="game.createdTeam(user.map.id)"
+        @click="game.createdTeam(user.map.id);user.isleader=true;"
         size="small"
         type="success"
       >
@@ -306,6 +330,7 @@
             :key="item._id"
             @click.native="() => {
               game.addTeam(item._id);
+              user.teamleader = item.leader.nickname;
             }"
           >
             {{item.leader.nickname}}
@@ -343,29 +368,8 @@
       </DropdownMenu>
     </Dropdown>
     <!-- 捕捉 ↓ -->
-    捕捉：
-    <Select v-model="user.catchPet" multiple size="small" style="width: auto;">
-      <Option
-        v-for="monster in monsterList"
-        :value="monster"
-        :label="monster"
-        :key="monster"
-      >
-        {{monster}}
-      </Option>
-    </Select>
-    &nbsp;
-    丢弃：
-    <Select v-model="user.discardPet" multiple size="small" style="width: auto;">
-      <Option
-        v-for="monster in monsterList"
-        :value="monster"
-        :key="monster"
-      >
-        {{monster}}
-      </Option>
-    </Select>
-    <div class="br" />
+    <PetCatchCtrlComponent v-if="user && game" :user="user" :game="game" />
+    <!-- 捕捉 ↑ -->
     <!-- 战斗信息 ↓ -->
     <div v-if="'object' == typeof user.message">
       [{{ user.message.time }}]
@@ -373,6 +377,7 @@
       {{'第' + user.message.round_num + '轮'}}
       &nbsp;
       <div
+        v-if="user.message.mark"
         v-html="user.message.mark"
       />
       <div
@@ -450,9 +455,10 @@ import SkillsComponent from '@components/skills.vue';
 import TasksComponent from '@components/tasks.vue';
 import UserinfoComponent from '@components/userinfo.vue';
 import ShopComponent from '@components/shop.vue';
+import PetCatchCtrlComponent from '@components/pet-catch-ctrl.vue';
 export default {
   name: "User",
-  components: { BagComponent, EqsComponent, MarketComponent, PetComponent, SkillsComponent, TasksComponent, UserinfoComponent, ShopComponent },
+  components: { BagComponent, EqsComponent, MarketComponent, PetComponent, SkillsComponent, TasksComponent, UserinfoComponent, ShopComponent, PetCatchCtrlComponent },
   data() {
     return {
       game: {},
@@ -467,8 +473,7 @@ export default {
         beginTime: 0, //开始时间
         roundCount: 0, //回合数
         fightCount: 0, //战斗场数
-      },
-      monsterList: JSON.parse(localStorage.getItem('monsterList') || '[]'), // 怪物列表
+      }
     };
   },
   watch: {
@@ -487,17 +492,17 @@ export default {
               combatTotal = combat.player_num;
             }
           }
+          if (user.combatId) {
+            const tempcombat = user.screens.find(
+              (scr) => scr._id === user.combatId
+            );
+            user.tempcombatname = tempcombat.name
+          }
         }
         user.combatName = combatName;
         user.combatTotal = combatTotal;
         this.saveStorageUserInfo(user);
       },
-    },
-    monsterList: {
-      deep: true,
-      handler (list) {
-        localStorage.setItem('monsterList', JSON.stringify(list))
-      }
     }
   },
   computed: {
@@ -577,7 +582,7 @@ export default {
       if (now - messageTime > 30000) {
         setTimeout(() => {
           window.location.reload();
-        }, ~~(Math.random()*60*1000)+30000);
+        }, ~~(Math.random()*60*1000));
       }
     }, 60000);
   },
@@ -603,8 +608,19 @@ export default {
           email: user.email,
           skillid: user.skillid,
           skillname: user.skillname,
+          tempcombat: user.tempcombat,
+          combatId: user.combatId,
+          catchType: user.catchType,
+          catchSkills: user.catchSkills,
+          catchPetBySkill: user.catchPetBySkill,
           catchPet: user.catchPet,
-          discardPet: user.discardPet || []
+          catchSuccess: user.catchSuccess || 0,
+          catchFail: user.catchFail || 0,
+          lockPet: user.lockPet,
+          isCompose: user.isCompose,
+          isleader: user.isleader,
+          teamleader: user.teamleader,
+          tempcombatid: user.tempcombatid
         })
       );
     },
@@ -658,24 +674,51 @@ export default {
       this.fightGains.roundCount++;
       data.msg = data.round_arr.map(ra => {
         if (ra.a_skill_type === 1) {
-          if (ra.mark.indexOf('成功') > 1) {
-            this.game.getMyPet();
+          if (ra.mark.indexOf(this.user.email) > -1) {
+            if (ra.mark.indexOf('成功') > 1) {
+              this.game.getMyPet();
+              // 记录捕捉成功和失败数据，用来嘲讽作者
+              if (!this.user.catchSuccess) { this.user.catchSuccess = 0; }
+              this.user.catchSuccess++;
+            }
+            if (ra.mark.indexOf('失败') > 1) {
+              if (!this.user.catchFail) { this.user.catchFail = 0; }
+              this.user.catchFail++;
+            }
+            if (ra.mark.indexOf('mp不足') > 1 || ra.mark.indexOf('无法捕捉') > 1) {
+              this.$Message.info('自动切换技能攻击早点结束');
+              this.game.roundOperating(
+                  this.user.skilltype || '1',
+                  this.user.skillid || '1',
+                  '',
+                  this.user.team ? this.user.team._id : ''
+              );
+            }
           }
           return ra.mark;
         }
         let trigger = '';
         if (ra.a_trigger.length > 0) {
-          trigger = '触发了【';
+          trigger = '【';
           trigger += ra.a_trigger.join('，');
-          trigger += '】';
+          trigger += '！！！】';
         }
-        return `【${ra.a_name}】${trigger}对【${ra.b_name}】使用了【${ra.process}】造成了【${ra.hurt
-              .map(Math.floor)
-              .join(",")}】伤害`
-      })
+        let belong = '';
+        if (ra.a_id != ra.a_name) {
+          belong = `${ra.a_id}的`;
+        }
+        const a = `${belong}${ra.a_name}`;
+        const b = `【${ra.b_name}】`;
+        const hurt = ra.hurt.map(Math.floor).join(",");
+        if (ra.hurt_type === 1) {
+          return `${a}：${ra.process}！${trigger}${b}随即受到了【${hurt}】点伤害`;
+        } else {
+          return `${a}：${ra.process}！${trigger}然后胸一甩，对${b}奶了一口[${hurt}]`;
+        }
+      });
 
       if (data.die_arr && data.die_arr.length) {
-        data.msg.push(data.die_arr.map((da) => `${da}卒`).join(","));
+        data.msg.push(`死亡单位【${data.die_arr.map((da) => `${da}`).join(",")}】`);
       }
 
       if (data.win === 1) {
@@ -711,8 +754,12 @@ export default {
         });
       }
       if (data.win === 2) {
-        data.msg.push("你死了");
         this.fightGains.fightCount++;
+
+        // 回合数大于0却没经验，属于在线异常状态，标记异常由home总控处理
+        if (this.gains.roundCount > 0 && !this.gains.avgExp) {
+          this.user.teamStatus = 'leave';
+        }
       }
 
       this.$set(this.user, "message", data);
@@ -766,6 +813,7 @@ export default {
         this.$Message.success(`正在挥动洛阳铲`);
         this.game.wbt(cbt.btId);
       }
+      await sleep(1000);
       this.$Modal.info({
         render: () => (
           <div>
@@ -793,9 +841,12 @@ export default {
       for(let i = 0; i < path.length; i++) {
         const map = path[i];
         this.$Message.success(`正在切图去${map.name}`);
-        this.game.moveToNewMap(map.id);
         await sleep(5000);
+        this.game.moveToNewMap(map.id);
       }
+    },
+    handleUseItem () {
+      this.useItem_mixin(this.readToUse);
     }
   }
 };

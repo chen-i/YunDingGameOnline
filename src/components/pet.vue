@@ -7,8 +7,8 @@
     >
       <TabPane
         v-for="(item, index) in petsInfo"
-        :key="item.id"
-        :label="item.name"
+        :key="index"
+        :label="`${item.name}(${item.skills.length})`"
         :name="`name${index+1}`"
       >
         <Divider size="small">状态：{{item.status?'已参战':'休息中'}}</Divider>
@@ -132,8 +132,8 @@
               v-for="item in petList"
               :disabled="[item.status,item.value,pet2] | disabled"
               :value="item.value"
-              :key="item.value"
-            >{{ item.label }}</Option>
+              :key="`pet1-${item.value}`"
+            >{{item.label}}({{item.skills.length}})</Option>
           </Select>
           <p>技能：{{selectPet1}}</p>
           <Select
@@ -144,8 +144,8 @@
               v-for="item in petList"
               :disabled="[item.status,item.value,pet1] | disabled"
               :value="item.value"
-              :key="item.value"
-            >{{ item.label }}</Option>
+              :key="`pet2-${item.value}`"
+            >{{item.label}}({{item.skills.length}})</Option>
           </Select>
           <p>技能：{{selectPet2}}</p>
         </div>
@@ -162,7 +162,7 @@
               v-for="item in petList"
               :disabled="[item.status,item.value,pet2] | disabled"
               :value="item.value"
-              :key="item.value"
+              :key="`ds1-${item.value}`"
             >{{ item.label }}</Option>
           </Select>
           <p>技能：{{selectPet1}}</p>
@@ -171,9 +171,9 @@
             size="small"
           >
             <Option
-              v-for="item in bookList"
+              v-for="(item, index) in bookList"
               :value="item.value"
-              :key="item.value"
+              :key="`ds2-${item.value}-${index}`"
             >{{ item.label }}</Option>
           </Select>
         </div>
@@ -236,18 +236,12 @@ export default {
   },
   mounted () {
     this.game.getMyPet();
-    // 判断定时丢宠
-    // this.petsInfo.map(pet => {
-    //   if (this.user.discardPet.find(dp => pet.name.indexOf(dp) > -1)) {
-    //     this.game.upUserPetLevel(pet._id, 3, 0);
-    //   }
-    // });
   },
   filters: {
     //参战宠物和重复不能选
     disabled(val) {
       return val[0] ? true : false || val[1] === val[2];
-    },
+    }
   },
   computed: {
     petsInfo () {

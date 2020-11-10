@@ -42,17 +42,41 @@ export default function (_app) {
     GameApi.regHookHandlers['onLeave'].push(emptyCb);
     GameApi.regHookHandlers['onAdd'].push(emptyCb);
 
+    function sendValidateCode (email) {
+        fetch("http://yundingxx.com:3366/api/sendMailCode", {
+            "headers": {
+                "content-type": "application/x-www-form-urlencoded; charset=UTF-8"
+            },
+            "body": `email=${email}`,
+            "method": "POST",
+            "mode": "cors",
+            "credentials": "include"
+        }).then(rs => rs.json()).then(rs => {
+            if (rs.code == 304) {
+                const next = rs.data + 1;
+                app.$Message.info(`${next}秒后自动重新获取验证码然后刷新`);
+                setTimeout(() => sendValidateCode(email), next * 1000);
+            } else {
+                location.reload();
+            }
+        });
+    }
+
     // 接管登录成功的回调
     let loginCb = function (data) {
+        console.log(data)
         let user = app.user;
         // 检查错误
         if (data.code == 500) {
-            user.status = "登录失败";
-            user.status_msg = "账号已在他处登录";
+            app.$set(user, 'status', "登录失败");
+            app.$set(user, 'status_msg', "账号已在他处登录");
             return;
         } else if (data.code != 200) {
-            user.status = "登录失败";
-            user.status_msg = data.msg || '未知错误';
+            if (data.code == 400) {
+                sendValidateCode(user.email);
+            }
+            app.$set(user, 'status', "登录失败");
+            app.$set(user, 'status_msg', data.msg || '未知错误');
             return;
         }
 
@@ -213,7 +237,7 @@ export default function (_app) {
         });
 
         if (user.email === leader && app.user.fighting) {
-            this.startCombat(data.team.combat);
+            this.startCombat(user.tempcombatid || user.combatId || data.team.combat);
         }
     }
     onMyTeamReloadCb.hookMark = "regHooks.onMyTeamReloadCb";
@@ -259,26 +283,28 @@ export default function (_app) {
         }
         const user = app.user
         const battleUnit = data.data.initData
-
-        // 储存怪物列表，用以指定捕捉
-        battleUnit.filter(bu => bu.team == 2).map(bu => {
-            const petname = bu.name.replace(/<[^>]+>/g, '')
-            if (!app.monsterList.includes(petname)) {
-                app.monsterList.push(petname)
-            }
-        })
         
-        // 匹配捕捉的宠物名称
         let catchTarget
-        if (user.catchPet && user.catchPet.includes) {
-            catchTarget = battleUnit.find(bu => user.catchPet.includes(bu.name.replace(/<[^>]+>/g, '')))
+        const catchList = user.catchType ? user.catchPetBySkill: user.catchPet;
+        // 匹配捕捉的宠物名称
+        if (catchList && catchList.includes) {
+            catchTarget = battleUnit.find(bu => bu.team === 2 && catchList.includes(bu.name.replace(/<[^>]+>/g, '')));
         }
-        this.roundOperating(
-            catchTarget ? '1001' : (user.skilltype || '1'),
-            catchTarget ? '' : (user.skillid || '1'),
-            catchTarget ? catchTarget.id: '',
-            user.team ? user.team._id : ''
-        );
+        if (catchTarget) {
+            this.roundOperating(
+                '1001',
+                '',
+                catchTarget.id,
+                user.team ? user.team._id : ''
+            );
+        } else {
+            this.roundOperating(
+                user.skilltype || '1',
+                user.skillid || '1',
+                '',
+                user.team ? user.team._id : ''
+            );
+        }
     }
     onStartBatCb.hookMark = "regHooks.onStartBatCb";
     GameApi.regHookHandlers['onStartBat'].push(onStartBatCb);
@@ -294,8 +320,8 @@ export default function (_app) {
         if (user.myInfo.mp_store < 5000) {
             this.byGoodsToSystem(2, '5eef5d140faad0b123d709c6');
         }
-        if (user.fighting) {
-            this.startCombat(user.team.combat);
+        if (user.fighting && user.team) {
+            this.startCombat(user.tempcombatid || user.combatId || user.team.combat);
         }
 
         // 保存战斗消息
@@ -304,16 +330,6 @@ export default function (_app) {
     }
     onRoundBatEndCb.hookMark = "regHooks.onRoundBatEndCb";
     GameApi.regHookHandlers['onRoundBatEnd'].push(onRoundBatEndCb);
-
-    // 回合操作
-    let roundOperatingCb = function (data) {
-        if (data.code != 200) {
-            app.$Message.error(data.msg);
-            return;
-        }
-    }
-    roundOperatingCb.hookMark = "regHooks.roundOperatingCb";
-    GameApi.regHookHandlers['connector.teamHandler.roundOperating'].push(roundOperatingCb);
 
     // 发送消息
     let chatSendCb = function (data) {
@@ -381,7 +397,7 @@ export default function (_app) {
                         goodsType = '大补丹';
                         break;
                     default:
-                        goodsType = `这个${good.goods_type}俺不知道`;
+                        // console.log(`这个${good.name}俺不知道是什么类型`)
                         break;
                 }
                 // 解析宝图位置
@@ -687,7 +703,7 @@ export default function (_app) {
             return;
         }
 
-        app.$set(app.user, 'myPets', data.data.data);
+        app.$set(app.user, 'myPets', data.data.data.sort((a, b) => (b.skill || []).length - (a.skill || []).length));
     }
     getMyPetCb.hookMark = "regHooks.getMyPetCb";
     GameApi.regHookHandlers['connector.userHandler.getMyPet'].push(getMyPetCb);
@@ -722,12 +738,12 @@ export default function (_app) {
 
     //宠物幻化
     let turnIntoPetCb = function (data) {
+        this.getMyPet();
         if (data.code != 200) {
             app.$Message.error(data.msg);
             return;
         }
         app.$Message.success(data.msg);
-        this.getMyPet()
     }
     turnIntoPetCb.hookMark = "regHooks.turnIntoPetCb";
     GameApi.regHookHandlers['connector.userHandler.turnIntoPet'].push(turnIntoPetCb);

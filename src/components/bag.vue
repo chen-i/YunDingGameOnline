@@ -22,8 +22,8 @@
     </div>
     <div class="goods-box">
       <Badge
-        v-for="item in goods"
-        :key="item.id"
+        v-for="(item, index) in goods"
+        :key="`${item.id}-${index}`"
         :count="item.selected"
         overflow-count="999"
       >
@@ -57,8 +57,8 @@
                 v-for="(value,key) in readToUse.eq_info"
                 :key="key"
               >
-                <span :style="key | addStyle">{{key}}:</span>
-                <span :style="key | addStyle">{{value}}</span>
+                <span :style="key | addStyle_mixin">{{key}}:</span>
+                <span :style="key | addStyle_mixin">{{value}}</span>
               </span>
             </div>
           </template>

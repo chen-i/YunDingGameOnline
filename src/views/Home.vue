@@ -1,15 +1,5 @@
 <template>
   <div class="home">
-    <div v-show="showMoling">
-      <div class="moling" :style="{ left: '50%', fontSize: '80px', animation: 'molingframe 1s linear 0s infinite' }">魔灵现世</div>
-      <div
-        v-for="(m, i) in molingPosition"
-        :key="m"
-        class="moling"
-        :style="{ top: `${(i + 1) * 130}px`, left: '50%', animation: 'molingframe 1s linear 1s infinite' }">
-        {{m}}
-      </div>
-    </div>
     <Form
       ref="formInline"
       :model="formInline"
@@ -34,9 +24,6 @@
         <Button type="primary" size="small" @click="showScreensContent = true">副本资料</Button>
       </FormItem>
       <FormItem>
-        <Input type="password" v-model="SCKEY" @on-change="handleSCKEYChange" placeholder="serverChan SCKEY" />
-      </FormItem>
-      <FormItem>
         弹幕
         <i-switch v-model="openDm">
           <span slot="open">开</span>
@@ -46,9 +33,28 @@
       <FormItem>
         <Input v-if="openDm" search enter-button="发送" placeholder="快来发送弹幕吧" @on-search="handleSendChat" v-model="sendMsg"/>
       </FormItem>
-      <FormItem v-if="nextMoling">
-        魔灵将在<Time :time="nextMoling" :interval="999999999"/>出现
+      <FormItem>
+        无限挂机
+        <i-switch
+          v-model="forever"
+        />
       </FormItem>
+      <br />
+      <!-- <FormItem label="每日计划：" style="width:100%">
+        <CheckboxGroup v-model="dayPlan">
+          <Checkbox
+            v-for="option in dayPlanOptions"
+            :key="option.label"
+            border
+            :label="option.value"
+          >
+            {{option.label}}
+            <span v-if="option.isDone.length">
+              {{option.isDone.join(',')}}√
+            </span>
+          </Checkbox>
+        </CheckboxGroup>
+      </FormItem> -->
     </Form>
     <div class="card-container">
       <Row :gutter="8">
@@ -92,21 +98,13 @@
         {{msg.nickname || '系统'}}：<label v-html="msg.msg" />
       </Tag>
     </div>
-    <iframe :src="serverChanUrl" v-if="serverChanUrl" @onload="serverChanUrl = null" style="display:none;"/>
     <Drawer
       v-model="showSkillMap"
       :mask="false"
-      width="500px"
+      width="300px"
       title="技能图鉴"
     >
-      <Alert
-        v-for="(value,key) in skillMap"
-        :key="key"
-        style="margin-bottom: 8px;"
-      >
-        {{key}}
-        【{{value}}】
-      </Alert>
+      <SkillMapComponent :skillMap="skillMap" />
     </Drawer>
     <Drawer
       v-model="showScreensContent"
@@ -135,10 +133,11 @@ let lastServerChanSend = 0;
 
 import ScreensComponent from '@components/screens.vue';
 import MonsterMapComponent from '@components/monster-map.vue';
+import SkillMapComponent from '@components/skill-map.vue';
 import { sleep, randomNum } from "@libs/tools";
 export default {
   name: 'Home',
-  components: { ScreensComponent, MonsterMapComponent },
+  components: { ScreensComponent, MonsterMapComponent, SkillMapComponent },
   data () {
     return {
       randomNum,
@@ -153,16 +152,20 @@ export default {
       msgDm: [],
       sendMsg: '',
       dmline: 0,
-      SCKEY: localStorage.getItem('sckey'),
-      serverChanUrl: null,
       showSkillMap: false,
       skillMap: {},
       showMonsterMap: false,
       showScreensContent: false,
       screens: [],
-      showMoling: false,
-      nextMoling: null,
-      molingPosition: []
+      dayPlan: [],
+      forever: false,
+      dayPlanOptions: [
+        { label: '荆棘之海', value: '5eecd6110ec93271652d2940', isDone: [] },
+        { label: '每日冒险', value: '5eef5927a447f4ad9b833648', isDone: [] },
+        { label: '深渊幻镜', value: '5ef9ff6669e97e5e22ccd5c5', isDone: [] },
+        { label: '宝藏山', value: '5efe93c6075268219ac2e630', isDone: [] },
+        { label: '鹊仙桥', value: '5f44e054e7c88d4126a9df14', isDone: [] }
+      ]
     }
   },
   watch: {
@@ -172,11 +175,6 @@ export default {
         if (length === 0) return
         const dm = this.msgList[length - 1]
         if (this.msgDm.some(md => md.msg === dm.msg)) return
-        if (dm.msg.indexOf("<span style='color:red;'>魔灵</span>") > -1) {
-          try {
-            this.molingPosition.push(dm.msg.replace(/<[^>]+>/g, '').split(' ').pop());
-          } catch (e) { console.error(e); }
-        }
         dm.top = this.randomNum(0, this.dmline)
         dm.color = this.getDmColor(dm)
         this.msgDm.push(dm)
@@ -184,7 +182,7 @@ export default {
     }
   },
   mounted () {
-    // 加载历史账号
+    // 加载历史账号s
     const users = this.getStorageUser();
     const userList = []
     Object.keys(users).forEach((email) => {
@@ -197,54 +195,151 @@ export default {
       this.dmline = Math.floor(window.document.body.offsetHeight / 36) - 1
     })
 
-    // 每隔5分钟检测有没有队伍
+    let startTime = Date.now();
+    let planCheckTimes = 0;
+    const fullTeamLeader = [];
+    const teammateNotInTeam = [];
+    // 每隔12秒检测有没有队伍
     setInterval(() => {
-      if (!this.SCKEY) return
-      const frames = this.$refs['userFrame']
-      const emptyTeamUser = []
+      if (!this.forever) return;
+      
+      // 每24个小时执行一次
+      if ((Date.now() - startTime) > 24 * 60 * 60 * 1000) { // 24 * 60 * 60 * 1000) {
+        this.dayPlanOptions.map(dpo => dpo.isDone = []);
+        startTime = Date.now();
+      }
+
+      const { dayPlan, dayPlanOptions } = this;
+      const frames = this.$refs['userFrame'];
       frames.map(fms => {
-        const us = fms.contentWindow.user
-        if (!us.team) {
-          emptyTeamUser.push(us.email)
+        const { user, game } = fms.contentWindow
+        if (!user || !game) return;
+
+        if (user.team) {
+          // 队长判断
+          if (user.isleader) {
+            // 满队且自己队友加不进的情况下就解散队伍重组
+            const fullIndex = fullTeamLeader.findIndex(ftl => ftl == user.email);
+            if (fullIndex > -1) {
+              game.leaveTeam();
+              fullTeamLeader.splice(fullIndex, 1);
+              return
+            }
+            
+            // 队员掉队找不到队伍了，队长这里却满员，刷新一下重新接收队伍信息即可解决
+            const teamnotInIndex = teammateNotInTeam.findIndex(tnit => tnit == user.email);
+            if (teamnotInIndex > -1) {
+              teammateNotInTeam.splice(teamnotInIndex, 1);
+              if (user.team.users.length === 5) {
+                game.showMyTeam(1);
+                fms.contentWindow.location.reload();
+                return;
+              }
+            }
+
+            // 没副本就切换副本
+            if (!user.combatName) {
+              user.team.combat = user.tempcombat;
+              game.switchCombatScreen(user.tempcombat);
+              user.fighting = true;
+              game.startCombat(user.team.combat);
+            }
+            if (user.combatId) {
+              if (user.team.users.length === 5) {
+                game.showMyTeam(0);
+              } else {
+                game.showMyTeam(1);
+              }
+            }
+
+            // 每日计划判断
+            if (dayPlan.length) {
+              const undonePlan = dayPlanOptions.find(dpo => dayPlan.includes(dpo.value) && !dpo.isDone.includes(user.email));
+              if (undonePlan) {
+                if (user.message && user.message.msg) {
+                  const msg = user.message.msg[user.message.msg.length - 1];
+                  if (msg.indexOf('达挑战上限，无奖励') > -1) {
+                    if (user.team.combat == undonePlan.value) {
+                      undonePlan.isDone.push(user.email);
+                    } else if (planCheckTimes > 4) {
+                      undonePlan.isDone.push(user.email);
+                      planCheckTimes = 0;
+                    }
+                  }
+                }
+                this.$Message.info(`【${user.email}】正在执行每日计划【${undonePlan.label}】`);
+                if (user.combatId) {
+                  user.tempcombatid = undonePlan.value;
+                  planCheckTimes++;
+                } else if (user.team.combat != undonePlan.value) {
+                  user.team.combat = undonePlan.value;
+                  game.switchCombatScreen(undonePlan.value);
+                }
+              } else {
+                if (user.combatId) {
+                  delete user.tempcombatid;
+                } else if (user.team.combat != user.tempcombat) {
+                  user.team.combat = user.tempcombat;
+                  game.switchCombatScreen(user.tempcombat);
+                }
+              }
+            }
+          }
+        } else if (user.map) {
+          // 队长判断
+          if (user.isleader) {
+            // 创建队伍
+            game.createdTeam(user.map.id);
+          }
+          // 队员判断
+          if (user.teamleader) {
+            // 获取队伍
+            game.getTeamList(user.map.id);
+            if (user.teams) {
+              // 找到队伍之后就加入队伍
+              const team = user.teams.find(t => t.leader.nickname === user.teamleader);
+              if (team) {
+                // 判断有没有满队，满队加不进，队长直接解散队伍
+                if (team.users.length == (team.combat || {}).player_num){
+                  if (!user.teamleader.includes(user.teamleader)) {
+                    if (!fullTeamLeader.includes(user.teamleader)) {
+                      fullTeamLeader.push(user.teamleader);
+                    }
+                  }
+                } else {
+                  game.addTeam(team._id);
+                }
+              } else {
+                // 没找到队伍，需要队长看看是不是卡队员了
+                if (!teammateNotInTeam.includes(user.teamleader)) {
+                  teammateNotInTeam.push(user.teamleader);
+                }
+              }
+            }
+          }
+        }
+
+        // 队伍状态异常，需要刷新重新接收所有东西
+        if (user.teamStatus === 'leave') {
+          fms.contentWindow.location.reload();
         }
       })
-      if (emptyTeamUser.length === 0) return
-      this.serverChanUrl = `https://sc.ftqq.com/${this.SCKEY}.send?text=来自夏影的温馨提醒&desp=你的这些账号[${emptyTeamUser.join('，')}]已经不在队伍里面，我怀疑已经掉线了`
-    }, 310000);
+    }, 12000);
 
     const mdata = window.monsterData.data;
     const skillMap = {};
     mdata.map(md => {
       md.skill && md.skill.map(sk => {
-        skillMap[sk.name] = sk.info;
+        skillMap[sk.name] = sk;
       });
     });
     this.skillMap = skillMap;
-
-    this.checkMoling();
   },
   methods: {
-    checkMoling () {
-      let nextMoling = Number(new Date(new Date().toLocaleDateString()).getTime() + 15 * 60 * 60 * 1000)
-      if (now > nextMoling) {
-        if (now - nextMoling < 60 * 60 * 1000) {
-          this.showMoling = true;
-        } else {
-          this.showMoling = false;
-        }
-        nextMoling += 24 * 60 * 60 * 1000;
-      }
-      this.nextMoling = nextMoling;
-      setTimeout(this.checkMoling, 60000);
-    },
-    handleSCKEYChange () {
-      localStorage.setItem('sckey', this.SCKEY);
-    },
     frameLoad (index) {
       if (index != 0) return;
       this.msgList = this.$refs['userFrame'][0].contentWindow.chatMsg;
       this.screens = this.$refs['userFrame'][0].contentWindow.screens;
-      this.openDm = false;
     },
     getDmColor (msg) {
       // 回收弹幕
